@@ -1,64 +1,108 @@
+# ============================================================
 # RAG System - Configurazione Centralizzata
+# Modifica SOLO questo file per configurare l'intero sistema
+# ============================================================
 
-# ===== PERCORSI =====
+# === PERCORSI ===
 documents_path: "./data"
+output_path: "./output"
 
-# ===== EMBEDDING MODEL =====
-embedding_model: "jinaai/jina-embeddings-v3"
-embedding_dimension: 1024
-embedding_task_passage: "retrieval.passage"
-embedding_task_query: "retrieval.query"
-trust_remote_code: true
+# === LLM (OpenAI-compatible) ===
+# Funziona con: Ollama, LM Studio, vLLM, OpenAI, Together, qualsiasi API OpenAI-compatible
+# Per Ollama: base_url "http://localhost:11434/v1", api_key "ollama"
+# Per LM Studio: base_url "http://localhost:1234/v1", api_key "lm-studio"
+# Per OpenAI: base_url "https://api.openai.com/v1", api_key "sk-..."
+llm:
+  base_url: "http://ollama:11434/v1"
+  api_key: "ollama"
+  model: "qwen3:8b"
+  temperature: 0.3
+  max_tokens: 4096
+  system_prompt: >
+    Sei un assistente RAG intelligente. Hai accesso a tool per cercare documenti,
+    gestire la memoria e creare file. Usa i tool appropriati per rispondere.
+    Cita le fonti quando possibile. Se non hai informazioni sufficienti, dillo.
 
-# ===== CHUNKING =====
+# === EMBEDDING MULTIMODALI (dual-model) ===
+embeddings:
+  primary:
+    model: "jinaai/jina-embeddings-v4"
+    dimension: 1024
+    task_passage: "retrieval.passage"
+    task_query: "retrieval.query"
+    trust_remote_code: true
+  secondary:
+    model: "nvidia/NV-Embed-v2"
+    dimension: 4096
+    trust_remote_code: true
+  # "primary", "secondary", "auto" (sceglie in base al tipo file)
+  active: "primary"
+
+# === CHUNKING ===
 chunk_size: 1024
 chunk_overlap: 200
-chunking_mode: "sentence" # "sentence" (semantico) o "character" (legacy)
+chunking_mode: "sentence"
 min_text_length: 50
 
-# ===== QDRANT =====
-# Modalità: "http" (Docker/server) o "local" (embedded, singolo processo)
-qdrant_mode: "http"
-qdrant_host: "localhost"
-qdrant_port: 6333
-qdrant_collection: "documents"
-# Path locale (usato solo se qdrant_mode: "local")
-vectorstore_path: "./qdrant_storage"
+# === QDRANT ===
+qdrant:
+  mode: "http"
+  host: "qdrant"
+  port: 6333
+  collection: "documents"
+  local_path: "./qdrant_storage"
 
-# ===== RICERCA =====
-top_k: 10
-similarity_threshold: 0.7 # Threshold base (fallback se adattivo disabilitato)
-adaptive_threshold: true # Abilita threshold adattivo basato su GAP analysis
-adaptive_threshold_min: 0.5 # Minimo threshold adattivo
-adaptive_threshold_max: 0.9 # Massimo threshold adattivo
+# === RICERCA ===
+search:
+  top_k: 10
+  similarity_threshold: 0.7
+  adaptive_threshold: true
+  adaptive_threshold_min: 0.5
+  adaptive_threshold_max: 0.9
+  rerank_enabled: true
+  rerank_model: "jinaai/jina-reranker-v2-base-multilingual"
+  rerank_top_n: 30
+  rerank_alpha: 0.4
 
-# ===== RERANKING =====
-rerank_enabled: true # true per attivare cross-encoder reranking
-rerank_model: "cross-encoder/ms-marco-MiniLM-L-6-v2" # Modello leggero e veloce
-rerank_top_n: 30 # Candidati da recuperare per reranking
-rerank_alpha: 0.4 # Peso vector_score in hybrid (0=solo rerank, 1=solo vector)
+# === MEMORIA (mem0) ===
+# mem0 condivide la knowledge base con RAG (cartella data/)
+# Durante l'ingestione, i chunk vengono aggiunti sia a Qdrant (RAG) sia a mem0
+memory:
+  enabled: true
+  user_id: "default"
+  mem0_config:
+    vector_store:
+      provider: "qdrant"
+      config:
+        host: "qdrant"
+        port: 6333
+        collection_name: "mem0_memories"
+    llm:
+      provider: "ollama"
+      config:
+        model: "qwen3:8b"
+        ollama_base_url: "http://ollama:11434"
+    embedder:
+      provider: "ollama"
+      config:
+        model: "nomic-embed-text"
+        ollama_base_url: "http://ollama:11434"
+    version: "v1.1"
 
-# ===== LLM (per chat.py) =====
-model: "gemini-3-pro-preview"
-temperature: 0.2
-max_tokens: 2048
+# === ESTRAZIONE DOCUMENTI ===
+# dots.ocr: UNICO strumento per PDF, immagini, documenti → testo
+# Whisper: UNICO strumento per audio → testo
+# Video: audio track → Whisper + keyframes → dots.ocr
+ocr:
+  engine: "dots"
+  languages: ["en", "it"]
 
-# ===== SERVER MCP =====
-mcp_server_name: "rag-docs"
-
-# ===== AUDIO (WHISPER) =====
 whisper_model: "turbo"
 
-# ===== PDF EXTRACTION =====
-# "layout" = analisi avanzata (blocchi, colonne, tabelle con bbox)
-# "markdown" = pymupdf4llm (tabelle/struttura)
-# "text" = solo testo lineare (legacy)
-pdf_extraction_mode: "layout"
-
-# ===== PROCESSING =====
+# === PROCESSING ===
 hash_buffer_size: 8192
 
-# ===== FILE EXTENSIONS =====
+# === ESTENSIONI SUPPORTATE ===
 extensions:
   text:
     - ".txt"
@@ -94,7 +138,31 @@ extensions:
     - ".wav"
     - ".ogg"
     - ".flac"
+  image:
+    - ".png"
+    - ".jpg"
+    - ".jpeg"
+    - ".gif"
+    - ".bmp"
+    - ".tiff"
+    - ".webp"
+  video:
+    - ".mp4"
+    - ".mkv"
+    - ".avi"
+    - ".mov"
+    - ".webm"
   notebook:
     - ".ipynb"
   excel:
     - ".xlsx"
+    - ".xls"
+  presentation:
+    - ".pptx"
+
+# === NOTE DI DESIGN ===
+# Caso d'uso di riferimento (guida il design, non implementato direttamente):
+# Studente carica materiale corso lingua (documenti, video), fa mock exam,
+# viene assistito domanda per domanda con brainstorming, writing/speaking
+# analysis (pronuncia, vocabolario, coesione). Richiede: chat ricorsiva
+# con contesto, memoria tra sessioni, multimodalita', output strutturato.

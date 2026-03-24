@@ -1,27 +1,35 @@
 # Core
 datapizza-ai>=0.0.2
-datapizza-ai-clients-google
 qdrant-client>=1.7.0
 pyyaml>=6.0
 rich>=13.0.0
-python-dotenv>=1.0.0
 pydantic>=2.0.0
-mcp>=1.0.0
-psutil>=5.9.0
-cryptography
 
-# Local Embeddings
+# LLM (OpenAI-compatible API - funziona con Ollama, LM Studio, vLLM, OpenAI, ecc.)
+openai>=1.0.0
+
+# Embeddings Multimodali
 sentence-transformers>=3.0.0
 einops>=0.8.0
 accelerate>=0.26.0
 
-# PDF Extraction
-pymupdf>=1.24.0
-pymupdf4llm>=0.0.17
-pymupdf_layout>=0.1.0
+# Reranking (Jina Reranker v2)
+# Caricato via sentence-transformers CrossEncoder
 
-# Audio Transcription (richiede FFmpeg)
+# Memory
+mem0ai>=0.1.0
+
+# Estrazione Documenti - dots.ocr per PDF, immagini, documenti
+# https://github.com/rednote-hilab/dots.ocr
+dots-ocr>=0.1.0
+
+# Audio Transcription (Whisper turbo, richiede FFmpeg)
 openai-whisper>=20240927
 
-# Excel Extraction
+# Video (keyframe extraction per dots.ocr)
+opencv-python-headless>=4.8.0
+Pillow>=10.0.0
+
+# Excel & Presentazioni (testo per chunking/display)
 openpyxl>=3.1.0
+python-pptx>=0.6.23

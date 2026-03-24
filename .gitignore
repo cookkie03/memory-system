@@ -10,29 +10,14 @@ __pycache__/
 *.so
 .Python
 build/
-develop-eggs/
 dist/
-downloads/
 eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
-MANIFEST
 
 # Virtual environments
 venv/
-ENV/
-env/
-.venv
+.venv/
 
 # IDE
 .vscode/
@@ -41,15 +26,15 @@ env/
 *.swo
 *~
 .DS_Store
-.claude
-.qodo
+.claude/
+.qodo/
 .cli_cache/
 
 # Project specific
 *.log
 .cache/
-.cache/
-*.pem
+output/
+qdrant_storage/
 
-# Dati sensibili/pesanti
+# Dati (documenti utente)
 data/

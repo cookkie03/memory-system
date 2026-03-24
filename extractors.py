@@ -1,4 +1,14 @@
-"""Estrattori di testo per formati non-testuali (PDF, Audio, Notebook, Excel)"""
+"""Estrattori di testo per chunking e display.
+
+Strumenti di estrazione:
+- dots.ocr: UNICO strumento per PDF, immagini, documenti → testo
+- Whisper turbo: UNICO strumento per audio → testo
+- Video: audio track → Whisper + keyframes → dots.ocr
+- Notebook: parsing JSON celle
+- Excel: openpyxl
+- Presentazioni: python-pptx
+- Testo: lettura diretta
+"""
 
 import logging
 from pathlib import Path
@@ -6,200 +16,242 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
-def extract_pdf_text(file_path: Path, mode: str = "markdown") -> str:
+# === dots.ocr (PDF, immagini, documenti) ===
+
+def extract_with_dots_ocr(file_path: Path) -> str:
+    """Estrae testo da qualsiasi documento/immagine usando dots.ocr.
+
+    Supporta nativamente: PDF, PNG, JPG, TIFF, BMP, WEBP, ecc.
+    https://github.com/rednote-hilab/dots.ocr
     """
-    Estrae testo da PDF con struttura preservata.
-    
-    Args:
-        file_path: Path del PDF
-        mode: "layout" (analisi avanzata), "markdown" (tabelle) o "text" (legacy)
-        
-    Returns:
-        Testo estratto (Markdown strutturato)
-        
-    Modes:
-        - "layout": Analisi avanzata con pymupdf_layout (blocchi, colonne, tabelle)
-        - "markdown": pymupdf4llm (tabelle, headers, liste)
-        - "text": PyMuPDF base (solo testo lineare)
-    """
-    
-    # === MODE: LAYOUT (analisi avanzata) ===
-    if mode == "layout":
-        try:
-            import fitz
-            from pymupdf_layout import LayoutAnalyzer
-            
-            doc = fitz.open(file_path)
-            analyzer = LayoutAnalyzer()
-            
-            all_text = []
-            for page_num, page in enumerate(doc, 1):
-                # Analizza il layout della pagina
-                layout = analyzer.analyze(page)
-                
-                page_parts = []
-                for block in layout:
-                    block_type = getattr(block, 'type', 'paragraph')
-                    text = getattr(block, 'text', str(block)).strip()
-                    
-                    if not text:
-                        continue
-                    
-                    # Formatta in base al tipo di blocco
-                    if block_type == 'header':
-                        page_parts.append(f"## {text}")
-                    elif block_type == 'table':
-                        page_parts.append(f"\n{text}\n")
-                    else:
-                        page_parts.append(text)
-                
-                if page_parts:
-                    all_text.append(f"<!-- Page {page_num} -->\n" + "\n\n".join(page_parts))
-            
-            doc.close()
-            return "\n\n---\n\n".join(all_text).strip()
-            
-        except ImportError as e:
-            logger.warning(f"pymupdf_layout import error: {e}")
-            logger.warning("pymupdf_layout non installato o fallito, fallback a pymupdf4llm")
-            mode = "markdown"  # Fallback
-        except Exception as e:
-            logger.warning(f"pymupdf_layout fallito ({e}), fallback a pymupdf4llm")
-            mode = "markdown"  # Fallback
-    
-    # === MODE: MARKDOWN (pymupdf4llm) ===
-    if mode == "markdown":
-        try:
-            import pymupdf4llm
-            # Estrae come Markdown con tabelle, headers, liste
-            md_text = pymupdf4llm.to_markdown(str(file_path))
-            return md_text.strip() if md_text else ""
-        except ImportError:
-            logger.warning("pymupdf4llm non installato, fallback a PyMuPDF base")
-        except Exception as e:
-            logger.warning(f"pymupdf4llm fallito ({e}), fallback a PyMuPDF base")
-    
-    # === FALLBACK: estrazione base con PyMuPDF ===
-    import fitz
-    text_parts = []
-    with fitz.open(file_path) as doc:
-        for page in doc:
-            text_parts.append(page.get_text())
-    return "\n\n".join(text_parts).strip()
+    try:
+        from dots_ocr import DotsOCR
+        ocr = DotsOCR()
+        result = ocr.recognize(str(file_path))
+        if isinstance(result, list):
+            return '\n'.join(str(r) for r in result).strip()
+        return str(result).strip()
+    except ImportError:
+        raise ImportError("pip install dots-ocr  (https://github.com/rednote-hilab/dots.ocr)")
+    except Exception as e:
+        logger.error(f"dots.ocr fallito per {file_path.name}: {e}")
+        raise
 
 
-def extract_audio_text(file_path: Path, model_name: str = "base") -> str:
-    """Trascrive audio usando Whisper (richiede FFmpeg)"""
-    import whisper
-    
-    logger.info(f"Caricamento modello Whisper '{model_name}'...")
+# === Whisper (Audio) ===
+
+def extract_audio_text(file_path: Path, model_name: str = "turbo") -> str:
+    """Trascrive audio usando Whisper turbo (richiede FFmpeg).
+
+    Nessun embedding model gestisce audio raw → Whisper e' necessario.
+    """
+    try:
+        import whisper
+    except ImportError:
+        raise ImportError("pip install openai-whisper  (richiede FFmpeg)")
+
+    logger.info(f"Whisper '{model_name}': trascrizione {file_path.name}...")
     model = whisper.load_model(model_name)
-    
-    logger.info(f"Trascrizione {file_path.name}...")
-    result = model.transcribe(str(file_path))
-    
+    result = model.transcribe(
+        str(file_path),
+        language=None,          # Auto-detect lingua
+        task="transcribe",
+        verbose=False,
+    )
     return result["text"].strip()
 
 
+# === Video (audio + keyframes) ===
+
+def extract_video_text(file_path: Path, config: dict = None) -> str:
+    """Estrae contenuto da video: audio → Whisper + keyframes → dots.ocr"""
+    parts = []
+    whisper_model = (config or {}).get('whisper_model', 'turbo')
+
+    # 1. Audio track → Whisper
+    try:
+        import subprocess
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+            tmp_path = tmp.name
+
+        subprocess.run(
+            ['ffmpeg', '-i', str(file_path), '-vn', '-acodec', 'pcm_s16le',
+             '-ar', '16000', '-ac', '1', tmp_path, '-y'],
+            capture_output=True, check=True
+        )
+        audio_text = extract_audio_text(Path(tmp_path), whisper_model)
+        if audio_text:
+            parts.append(f"[AUDIO TRANSCRIPT]\n{audio_text}")
+        Path(tmp_path).unlink(missing_ok=True)
+    except Exception as e:
+        logger.warning(f"Estrazione audio da video fallita: {e}")
+
+    # 2. Keyframes → dots.ocr
+    try:
+        import cv2
+        import tempfile
+        cap = cv2.VideoCapture(str(file_path))
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+
+        # 1 frame ogni 30 secondi, max 10 frame
+        interval = int(fps * 30)
+        frame_indices = list(range(0, total_frames, max(interval, 1)))[:10]
+
+        for fi in frame_indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, fi)
+            ret, frame = cap.read()
+            if not ret:
+                continue
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                cv2.imwrite(tmp.name, frame)
+                try:
+                    frame_text = extract_with_dots_ocr(Path(tmp.name))
+                    if frame_text:
+                        timestamp = fi / fps
+                        parts.append(f"[FRAME {timestamp:.0f}s]\n{frame_text}")
+                except Exception:
+                    pass
+                Path(tmp.name).unlink(missing_ok=True)
+        cap.release()
+    except ImportError:
+        logger.warning("opencv-python-headless non installato per estrazione frame video")
+    except Exception as e:
+        logger.warning(f"Estrazione frame video fallita: {e}")
+
+    return '\n\n---\n\n'.join(parts).strip() if parts else f"[Video: {file_path.name}]"
+
+
+# === Notebook ===
+
 def extract_notebook_text(file_path: Path) -> str:
-    """
-    Estrae testo strutturato da Jupyter Notebook.
-    Include codice, markdown E output con etichette per tipo.
-    """
+    """Estrae testo strutturato da Jupyter Notebook (codice, markdown, output)."""
     import json
     nb = json.loads(file_path.read_text(encoding='utf-8'))
     parts = []
-    
+
     for idx, cell in enumerate(nb.get('cells', []), 1):
         cell_type = cell.get('cell_type', 'raw')
         source = ''.join(cell.get('source', []))
-        
+
         if not source.strip() and cell_type != 'code':
             continue
-        
-        # Cella markdown o raw
+
         if cell_type == 'markdown':
             parts.append(f"[CELL {idx} | MARKDOWN]\n{source}")
-        
-        # Cella codice + output
         elif cell_type == 'code':
             parts.append(f"[CELL {idx} | CODE]\n```python\n{source}\n```")
-            
-            # Estrai output
             for out in cell.get('outputs', []):
                 otype = out.get('output_type', '')
-                
                 if otype == 'stream':
                     text = ''.join(out.get('text', []))
                     if text.strip():
                         parts.append(f"[CELL {idx} | OUTPUT]\n{text.strip()}")
-                
                 elif otype in ('execute_result', 'display_data'):
                     text = ''.join(out.get('data', {}).get('text/plain', []))
                     if text.strip():
                         parts.append(f"[CELL {idx} | RESULT]\n{text.strip()}")
-                
                 elif otype == 'error':
                     err = f"{out.get('ename', 'Error')}: {out.get('evalue', '')}"
                     parts.append(f"[CELL {idx} | ERROR]\n{err}")
-        
-        else:  # raw o altro
+        else:
             parts.append(f"[CELL {idx} | {cell_type.upper()}]\n{source}")
-    
+
     return '\n\n---\n\n'.join(parts).strip()
 
 
+# === Excel ===
+
 def extract_excel_text(file_path: Path) -> str:
-    """Estrae testo da Excel (.xlsx)"""
+    """Estrae testo da Excel (.xlsx)."""
     from openpyxl import load_workbook
     wb = load_workbook(file_path, read_only=True, data_only=True)
     texts = []
     for sheet in wb:
+        rows = []
         for row in sheet.iter_rows(values_only=True):
-            texts.append(' '.join(str(c) for c in row if c is not None))
-    return '\n'.join(texts).strip()
+            row_text = ' | '.join(str(c) for c in row if c is not None)
+            if row_text.strip():
+                rows.append(row_text)
+        if rows:
+            texts.append(f"[SHEET: {sheet.title}]\n" + '\n'.join(rows))
+    return '\n\n---\n\n'.join(texts).strip()
 
+
+# === Presentazioni ===
+
+def extract_presentation_text(file_path: Path) -> str:
+    """Estrae testo da PowerPoint (.pptx) - slide + note."""
+    from pptx import Presentation
+    prs = Presentation(str(file_path))
+    parts = []
+
+    for idx, slide in enumerate(prs.slides, 1):
+        slide_texts = []
+        for shape in slide.shapes:
+            if shape.has_text_frame:
+                for paragraph in shape.text_frame.paragraphs:
+                    text = paragraph.text.strip()
+                    if text:
+                        slide_texts.append(text)
+
+        notes_text = ""
+        if slide.has_notes_slide and slide.notes_slide.notes_text_frame:
+            notes_text = slide.notes_slide.notes_text_frame.text.strip()
+
+        if slide_texts or notes_text:
+            part = f"[SLIDE {idx}]\n" + '\n'.join(slide_texts)
+            if notes_text:
+                part += f"\n[NOTE]\n{notes_text}"
+            parts.append(part)
+
+    return '\n\n---\n\n'.join(parts).strip()
+
+
+# === Dispatcher ===
 
 def extract_text(file_path: Path, config: dict = None) -> tuple[str, str | None]:
-    """Estrae testo da qualsiasi formato supportato.
-    
-    Args:
-        file_path: Path del file da processare
-        config: Configurazione (opzionale, per whisper_model)
-        
+    """Dispatcher: estrae testo da qualsiasi formato supportato.
+
     Returns:
-        (testo, errore) - se errore è None, l'estrazione è riuscita
+        (testo, errore) - se errore e' None, l'estrazione e' riuscita
     """
     ext = file_path.suffix.lower()
-    
-    # Ottieni estensioni da config o usa default
-    if config:
-        pdf_ext = set(config.get('extensions', {}).get('pdf', ['.pdf']))
-        audio_ext = set(config.get('extensions', {}).get('audio', ['.mp3', '.m4a', '.wav', '.ogg', '.flac']))
-        notebook_ext = set(config.get('extensions', {}).get('notebook', ['.ipynb']))
-        excel_ext = set(config.get('extensions', {}).get('excel', ['.xlsx']))
-        whisper_model = config.get('whisper_model', 'base')
-        pdf_mode = config.get('pdf_extraction_mode', 'markdown')
-    else:
-        pdf_ext = {'.pdf'}
-        audio_ext = {'.mp3', '.m4a', '.wav', '.ogg', '.flac'}
-        notebook_ext = {'.ipynb'}
-        excel_ext = {'.xlsx'}
-        whisper_model = 'base'
-        pdf_mode = 'markdown'
-    
+    cfg = config or {}
+
+    audio_ext = set(cfg.get('extensions', {}).get('audio', ['.mp3', '.m4a', '.wav', '.ogg', '.flac']))
+    video_ext = set(cfg.get('extensions', {}).get('video', ['.mp4', '.mkv', '.avi']))
+    notebook_ext = set(cfg.get('extensions', {}).get('notebook', ['.ipynb']))
+    excel_ext = set(cfg.get('extensions', {}).get('excel', ['.xlsx']))
+    presentation_ext = set(cfg.get('extensions', {}).get('presentation', ['.pptx']))
+    pdf_ext = set(cfg.get('extensions', {}).get('pdf', ['.pdf']))
+    image_ext = set(cfg.get('extensions', {}).get('image', ['.png', '.jpg', '.jpeg']))
+
     try:
-        if ext in pdf_ext:
-            return extract_pdf_text(file_path, mode=pdf_mode), None
-        elif ext in audio_ext:
-            return extract_audio_text(file_path, whisper_model), None
-        elif ext in notebook_ext:
+        # dots.ocr per PDF e immagini
+        if ext in pdf_ext or ext in image_ext:
+            return extract_with_dots_ocr(file_path), None
+
+        # Whisper per audio
+        if ext in audio_ext:
+            return extract_audio_text(file_path, cfg.get('whisper_model', 'turbo')), None
+
+        # Video: audio + keyframes
+        if ext in video_ext:
+            return extract_video_text(file_path, cfg), None
+
+        # Formati strutturati
+        if ext in notebook_ext:
             return extract_notebook_text(file_path), None
-        elif ext in excel_ext:
+        if ext in excel_ext:
             return extract_excel_text(file_path), None
-        else:
-            # File di testo normale
-            return file_path.read_text(encoding='utf-8', errors='ignore').strip(), None
+        if ext in presentation_ext:
+            return extract_presentation_text(file_path), None
+
+        # Testo semplice
+        return file_path.read_text(encoding='utf-8', errors='ignore').strip(), None
+
     except ImportError as e:
         return "", f"Dipendenza mancante: {e}"
     except Exception as e:

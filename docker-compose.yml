@@ -1,0 +1,48 @@
+services:
+  # === Qdrant Vector Database ===
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+  # === Ollama LLM Server ===
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    # Per GPU NVIDIA, decommentare:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # === RAG System ===
+  rag:
+    build: .
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+      - ./config.yaml:/app/config.yaml
+      - rag_cache:/app/.cache
+    depends_on:
+      - qdrant
+      - ollama
+    stdin_open: true
+    tty: true
+    # Avvia chat interattiva di default
+    command: python main.py chat
+
+volumes:
+  qdrant_data:
+  ollama_data:
+  rag_cache:

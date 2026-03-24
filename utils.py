@@ -1,56 +1,34 @@
-"""Utility functions - Funzioni condivise"""
+"""Utility functions - Configurazione e helper condivisi"""
 
 import logging
-import os
 import yaml
 from pathlib import Path
-from dotenv import load_dotenv
 
 
-def setup_logging(config: dict) -> logging.Logger:
-    """Configura logging usando parametri da config"""
-    log_level = config.get('log_level', 'INFO')
-    log_file = config.get('log_file', 'rag_system.log')
-    
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper()),
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler(log_file)
-        ]
-    )
-    return logging.getLogger(__name__)
-
-
-def load_config(config_path = "config.yaml") -> dict:
-    """Carica configurazione YAML (accetta str o Path)"""
+def load_config(config_path="config.yaml") -> dict:
+    """Carica configurazione YAML centralizzata"""
     config_path = Path(config_path)
     if not config_path.exists():
         raise FileNotFoundError(f"Config non trovata: {config_path}")
-    
     with open(config_path, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
 
 
-def load_environment(env_path = None):
-    """Carica variabili ambiente da .env (accetta str o Path)"""
-    if env_path:
-        load_dotenv(Path(env_path))
-    else:
-        load_dotenv()
-
-
-def get_api_key(key_name: str = "GOOGLE_API_KEY") -> str:
-    """Ottiene API key da ambiente"""
-    api_key = os.getenv(key_name)
-    if not api_key:
-        raise ValueError(f"{key_name} non trovata. Aggiungi in .env")
-    return api_key
+def setup_logging(name: str = "rag", level: str = "INFO") -> logging.Logger:
+    """Configura e restituisce logger"""
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+        ))
+        logger.addHandler(handler)
+    logger.setLevel(getattr(logging, level.upper(), logging.INFO))
+    return logger
 
 
 def ensure_directory(path: str) -> Path:
-    """Crea directory se non esiste"""
+    """Crea directory se non esiste, restituisce Path"""
     dir_path = Path(path)
     dir_path.mkdir(parents=True, exist_ok=True)
     return dir_path
@@ -59,8 +37,7 @@ def ensure_directory(path: str) -> Path:
 def get_supported_extensions(config: dict) -> set:
     """Ottiene tutte le estensioni supportate da config"""
     extensions = set()
-    ext_config = config.get('extensions', {})
-    for category in ext_config.values():
+    for category in config.get('extensions', {}).values():
         if isinstance(category, list):
             extensions.update(category)
     return extensions
@@ -68,11 +45,38 @@ def get_supported_extensions(config: dict) -> set:
 
 def get_extensions_by_category(config: dict, category: str) -> set:
     """Ottiene estensioni per categoria specifica"""
-    ext_config = config.get('extensions', {})
-    return set(ext_config.get(category, []))
+    return set(config.get('extensions', {}).get(category, []))
 
 
 def is_supported_file(file_path: str, config: dict) -> bool:
-    """Verifica se file è supportato usando config"""
+    """Verifica se il file e' supportato"""
+    return Path(file_path).suffix.lower() in get_supported_extensions(config)
+
+
+def get_file_category(file_path: str, config: dict) -> str:
+    """Restituisce la categoria del file (text, pdf, audio, image, video, etc.)"""
     ext = Path(file_path).suffix.lower()
-    return ext in get_supported_extensions(config)
+    for category, exts in config.get('extensions', {}).items():
+        if isinstance(exts, list) and ext in exts:
+            return category
+    return "unknown"
+
+
+def get_active_embedding_config(config: dict, file_category: str = None) -> dict:
+    """Restituisce la config del modello embedding attivo.
+
+    In modalita' 'auto', sceglie il modello in base alla categoria del file:
+    - primary (Jina v4): text, pdf, code, image, notebook
+    - secondary (Nemotron): audio, video, excel, presentation
+    """
+    emb_config = config.get('embeddings', {})
+    active = emb_config.get('active', 'primary')
+
+    if active == 'auto' and file_category:
+        primary_categories = {'text', 'pdf', 'image', 'notebook'}
+        if file_category in primary_categories:
+            return emb_config.get('primary', {})
+        else:
+            return emb_config.get('secondary', {})
+
+    return emb_config.get(active, emb_config.get('primary', {}))
