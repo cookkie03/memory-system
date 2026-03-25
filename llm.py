@@ -137,8 +137,8 @@ class LLMClient:
         self.system_prompt = llm_cfg.get('system_prompt', '')
 
         base_url = llm_cfg.get('base_url', 'http://localhost:11434/v1')
-        # API key: env var LLM_API_KEY sovrascrive config.yaml
-        api_key = os.environ.get('LLM_API_KEY') or llm_cfg.get('api_key', 'ollama')
+        # API key: SOLO da env var LLM_API_KEY (vedi .env.example)
+        api_key = os.environ.get('LLM_API_KEY', 'ollama')
 
         self.client = OpenAI(base_url=base_url, api_key=api_key)
         logger.info(f"LLM: {base_url} (modello: {self.model})")

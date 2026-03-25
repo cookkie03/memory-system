@@ -9,12 +9,9 @@ output_path: "./output"
 
 # === LLM (OpenAI-compatible) ===
 # Funziona con: Ollama, LM Studio, vLLM, OpenAI, Together, qualsiasi API OpenAI-compatible
-# Per Ollama: base_url "http://localhost:11434/v1", api_key "ollama"
-# Per LM Studio: base_url "http://localhost:1234/v1", api_key "lm-studio"
-# Per OpenAI: base_url "https://api.openai.com/v1", api_key "sk-..."
+# API key: configurare SOLO via variabile d'ambiente LLM_API_KEY (vedi .env.example)
 llm:
   base_url: "http://ollama:11434/v1"
-  api_key: "ollama"
   model: "qwen3:8b"
   temperature: 0.3
   max_tokens: 4096
