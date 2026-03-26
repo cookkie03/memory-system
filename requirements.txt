@@ -1,5 +1,5 @@
 # Core
-datapizza-ai>=0.0.2
+datapizza-ai>=0.0.9
 qdrant-client>=1.7.0
 pyyaml>=6.0
 rich>=13.0.0
@@ -7,6 +7,9 @@ pydantic>=2.0.0
 
 # LLM (OpenAI-compatible API - funziona con Ollama, LM Studio, vLLM, OpenAI, ecc.)
 openai>=1.0.0
+
+# MCP Server (protocollo, non framework - necessario per esporre tool via MCP)
+mcp>=1.0.0
 
 # Embeddings Multimodali
 sentence-transformers>=3.0.0

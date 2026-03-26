@@ -26,7 +26,7 @@ services:
     #           count: all
     #           capabilities: [gpu]
 
-  # === RAG System ===
+  # === RAG Chat (interattiva locale) ===
   rag:
     build: .
     env_file:
@@ -41,8 +41,25 @@ services:
       - ollama
     stdin_open: true
     tty: true
-    # Avvia chat interattiva di default
     command: python main.py chat
+
+  # === MCP Server (accessibile da client MCP esterni) ===
+  mcp:
+    build: .
+    env_file:
+      - .env
+    ports:
+      - "${MCP_PORT:-8000}:8000"
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+      - ./config.yaml:/app/config.yaml
+      - rag_cache:/app/.cache
+    depends_on:
+      - qdrant
+      - ollama
+    restart: unless-stopped
+    command: python main.py mcp --sse
 
 volumes:
   qdrant_data:

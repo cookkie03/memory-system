@@ -16,5 +16,8 @@ COPY . .
 
 RUN mkdir -p /app/data /app/output /app/.cache
 
+# Porta MCP server (SSE)
+EXPOSE 8000
+
 ENTRYPOINT ["python", "main.py"]
 CMD ["chat"]

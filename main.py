@@ -3,6 +3,9 @@
 Uso:
     python main.py                  # Avvia chat (default)
     python main.py chat             # Avvia chat interattiva
+    python main.py mcp              # Avvia MCP server (stdio)
+    python main.py mcp --sse        # Avvia MCP server (SSE, porta 8000)
+    python main.py mcp --sse 8080   # Avvia MCP server (SSE, porta custom)
     python main.py ingest           # Indicizza documenti da ./data
     python main.py ingest --clean   # Re-indicizza da zero
     python main.py search "query"   # Ricerca veloce da CLI
@@ -21,6 +24,17 @@ def main():
     if command == "chat":
         from chat import Chat
         Chat(config).run()
+
+    elif command == "mcp":
+        from mcp_server import mcp as mcp_app
+        if "--sse" in sys.argv:
+            port = 8000
+            idx = sys.argv.index("--sse")
+            if idx + 1 < len(sys.argv) and sys.argv[idx + 1].isdigit():
+                port = int(sys.argv[idx + 1])
+            mcp_app.run(transport="sse", host="0.0.0.0", port=port)
+        else:
+            mcp_app.run(transport="stdio")
 
     elif command == "ingest":
         from ingest import Ingester
